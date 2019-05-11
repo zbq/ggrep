@@ -24,6 +24,7 @@
 (defvar-local ggrep-path-widget nil)
 (defvar-local ggrep-mask-widget nil)
 (defvar-local ggrep-search-for-widget nil)
+(defvar-local ggrep-result-buffer nil)
 
 (defun ggrep-find-dir ()
   (let ((dir (read-directory-name "Directory:" nil "" t)))
@@ -32,23 +33,78 @@
 		(error "Not a directory: %s" dir))
 	dir))
 
-(defun ggrep-grep (path-list mask-list search-for-list)
+(defun ggrep-grep (buffer path-list mask-list search-for-list)
   (let* ((path-list (remove "..." path-list))
 		 (mask-list (mapcar #'string-trim mask-list))
 		 (mask-list (remove-if #'string-empty-p mask-list))
 		 (mask-list (mapcar (lambda (wildcard) `(regexp ,(wildcard-to-regexp wildcard))) mask-list))
 		 (mask-rx (rx-to-string `(or ,@mask-list)))
 		 (search-for-list (mapcar #'string-trim search-for-list))
-		 (search-for-list (remove-if #'string-empty-p search-for-list)))
-	(dolist (path path-list)
-	  (dolist (file (directory-files-recursively path mask-rx))
-		(message file)))))
+		 (search-for-list (remove-if #'string-empty-p search-for-list))
+		 (grep-func (lambda (file) (list
+									(list
+									 :line-num "5"
+									 :head "hello, "
+									 :match "world"
+									 :tail ".")
+									(list
+									 :line-num "15"
+									 :head "hello, "
+									 :match "jj world"
+									 :tail " again."))))
+		 (output-func (lambda (last-dir shift-of-last-dir this-file matches)
+						"output:
++ dir
+ + file
+  - [[.../dir/file::5][5:]] xxxx *sdfsdf* yyy
+return shift of this-dir (directory of this-file)."
+						(let ((segs (split-string (file-relative-name this-file last-dir) "[/\\]"))
+							  (shift shift-of-last-dir))
+						  ;; output file hierarchy
+						  (dolist (seg segs)
+							(if (string-equal seg "..")
+								(decf shift)
+							  (progn
+								(dotimes (i shift)
+								  (insert " "))
+								(insert "+ " seg "\n")
+								(incf shift))))
+						  ;; output matches
+						  (dolist (match matches)
+							(dotimes (i (1+ shift))
+							  (insert " "))
+							(insert "- [[" this-file "::" (getf match :line-num) "][" (getf match :line-num) ":]] "
+									(getf match :head) "*" (getf match :match) "*" (getf match :tail) "\n"))
+						  (1- shift)))))
+	(when (not (get-buffer buffer))
+	  (setq buffer (get-buffer-create buffer))
+	  (with-current-buffer buffer
+		(org-mode)
+		(buffer-disable-undo)
+		(setq buffer-read-only t)))
+	(with-current-buffer buffer
+	  (let ((inhibit-read-only t))
+		;; clear buffer
+		(erase-buffer)
+		(insert "-*- mode: org; buffer-read-only: t -*-\n")
+		;; fill in grep result
+		(dolist (path path-list)
+		  (let ((last-dir path)
+				(shift-of-last-dir 1))
+			(insert "* " path "\n")
+			(dolist (file (directory-files-recursively path mask-rx))
+			  (when-let ((matches (funcall grep-func file)))
+				(setq shift-of-last-dir (funcall output-func last-dir shift-of-last-dir file matches)
+					  last-dir (file-name-directory file))))))
+		(set-buffer-modified-p nil)))
+	(switch-to-buffer-other-window buffer)))
 
 (defun ggrep-create-form ()
   "Create graphical form to get grep parameters."
   (interactive)
   (let ((buffer (generate-new-buffer "*ggrep*")))
 	(with-current-buffer buffer
+	  (setq ggrep-result-buffer (concat (buffer-name buffer) "-result"))
 	  (widget-insert "\n\ngrep with Graphical User Interface, output result in org-mode format\n\n")
 	  (widget-insert "Path:\n")
 	  (setq ggrep-path-widget
@@ -71,7 +127,8 @@
 	  (widget-insert "\n\n")
 	  (widget-create 'push-button
 					 :notify (lambda (&rest ignore)
-							   (ggrep-grep (widget-value ggrep-path-widget)
+							   (ggrep-grep ggrep-result-buffer
+										   (widget-value ggrep-path-widget)
 										   (widget-value ggrep-mask-widget)
 										   (widget-value ggrep-search-for-widget)))
 					 "Search")
