@@ -41,17 +41,30 @@
 		 (mask-rx (rx-to-string `(or ,@mask-list)))
 		 (search-for-list (mapcar #'string-trim search-for-list))
 		 (search-for-list (remove-if #'string-empty-p search-for-list))
-		 (grep-func (lambda (file) (list
-									(list
-									 :line-num "5"
-									 :head "hello, "
-									 :match "world"
-									 :tail ".")
-									(list
-									 :line-num "15"
-									 :head "hello, "
-									 :match "jj world"
-									 :tail " again."))))
+		 (search-for-rx (rx-to-string `(or ,@search-for-list)))
+		 (grep-func (lambda (fname search-for-rx)
+					  (with-temp-buffer
+						(insert-file-contents fname)
+						(goto-char (point-min))
+						(do* ((complete nil)
+							  (matches (cons 'head nil))
+							  (tail matches))
+							(complete (cdr matches))
+						  (if (re-search-forward search-for-rx nil t)
+							  (save-excursion
+								(goto-char (match-beginning 0))
+								(let* ((line-num (line-number-at-pos))
+									   (line-b (line-beginning-position))
+									   (line-e (min (+ 150 line-b) (line-end-position)))
+									   (match-b (min (match-beginning 0) line-e))
+									   (match-e (min (match-end 0) line-e)))
+								  (setf (cdr tail) (cons `(:line-num ,(number-to-string line-num)
+																	 :head ,(buffer-substring-no-properties line-b match-b)
+																	 :match ,(buffer-substring-no-properties match-b match-e)
+																	 :tail ,(buffer-substring-no-properties match-e line-e))
+														 nil))
+								  (setf tail (cdr tail))))
+							(setf complete t))))))
 		 (output-func (lambda (last-dir shift-of-last-dir this-file matches)
 						"output:
 + dir
@@ -93,7 +106,7 @@ return shift of this-dir (directory of this-file)."
 				(shift-of-last-dir 1))
 			(insert "* " path "\n")
 			(dolist (file (directory-files-recursively path mask-rx))
-			  (when-let ((matches (funcall grep-func file)))
+			  (when-let ((matches (funcall grep-func file search-for-rx)))
 				(setq shift-of-last-dir (funcall output-func last-dir shift-of-last-dir file matches)
 					  last-dir (file-name-directory file))))))
 		(set-buffer-modified-p nil)))
