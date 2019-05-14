@@ -37,13 +37,14 @@
   (let* ((path-list (or (remove "..." path-list)
 						(error "Need valid 'Path'")))
 		 (mask-list (mapcar #'string-trim mask-list))
-		 (mask-list (remove-if #'string-empty-p mask-list))
-		 (mask-list (or (mapcar (lambda (wildcard) `(regexp ,(wildcard-to-regexp wildcard))) mask-list)
+		 (mask-list (or (remove-if #'string-empty-p mask-list)
 						(error "Need valid 'File Mask'")))
+		 (mask-list (mapcar (lambda (wildcard) `(regexp ,(wildcard-to-regexp wildcard))) mask-list))
 		 (mask-rx (rx-to-string `(or ,@mask-list)))
 		 (search-for-list (mapcar #'string-trim search-for-list))
 		 (search-for-list (or (remove-if #'string-empty-p search-for-list)
 							  (error "Need valid 'Search for'")))
+		 (search-for-bak search-for-list)
 		 (search-for-list (mapcar (lambda (s) `(regexp ,s)) search-for-list))
 		 (search-for-rx (rx-to-string `(or ,@search-for-list)))
 		 (grep-func (lambda (fname search-for-rx)
@@ -60,7 +61,7 @@
 								(goto-char (match-beginning 0))
 								(let* ((line-num (line-number-at-pos))
 									   (line-b (line-beginning-position))
-									   (line-e (min (+ 150 line-b) (line-end-position))))
+									   (line-e (min (+ 180 line-b) (line-end-position))))
 								  (setf (cdr tail) (cons (list :line-num line-num
 															   :line (buffer-substring-no-properties line-b line-e))
 														 nil))
@@ -68,7 +69,8 @@
 								(forward-line 1))
 							(setf complete t))))))
 		 (output-func (lambda (last-dir shift-of-last-dir this-file matches)
-						"output:
+						"
+insert buffer:
 + dir
  + file
   - [[.../dir/file::5][5:]] xxxx yyy
@@ -100,7 +102,10 @@ return shift of this-dir (directory of this-file)."
 	  (buffer-disable-undo)
 	  ;; clear buffer
 	  (erase-buffer)
-	  (insert "-*- mode: org; buffer-read-only: t -*-\n")
+	  (insert "-*- mode: org; buffer-read-only: t -*-
+* Search for\n")
+	  (dolist (s search-for-bak)
+		(insert "  " s "\n"))
 	  ;; fill in grep result
 	  (dolist (path path-list)
 		(let ((last-dir path)
