@@ -27,7 +27,7 @@
 (defvar-local ggrep-result-buffer nil)
 
 (defun ggrep-find-dir (initial)
-  (let ((dir (read-directory-name "Directory:" (if (string-equal initial "...") nil initial) "" t)))
+  (let ((dir (read-directory-name "Directory:" (if (string-equal initial "...") default-directory initial) "" t)))
 	(setq dir (file-name-as-directory (expand-file-name dir)))
 	(or (file-directory-p dir)
 		(error "Not a directory: %s" dir))
@@ -52,22 +52,28 @@
 						(insert-file-contents fname)
 						(setq case-fold-search ignore-case)
 						(goto-char (point-min))
-						(do* ((complete nil)
+						(do* ((last-pt (point))
+							  (complete nil)
 							  (matches (cons '(:line-num -1) nil))
 							  (tail matches))
 							(complete (cdr matches))
-						  (if (re-search-forward search-for-rx nil t)
-							  (progn
+						  (if (not (re-search-forward search-for-rx nil t))
+							  (setf complete t)
+							(if (= last-pt (point))
+								(if (= last-pt (point-max))
+									(setf complete t)
+								  (forward-char))
+							  (save-excursion
 								(goto-char (match-beginning 0))
-								(let* ((line-num (line-number-at-pos))
-									   (line-b (line-beginning-position))
-									   (line-e (min (+ 180 line-b) (line-end-position))))
-								  (setf (cdr tail) (cons (list :line-num line-num
-															   :line (buffer-substring-no-properties line-b line-e))
-														 nil))
-								  (setf tail (cdr tail)))
-								(forward-line 1))
-							(setf complete t))))))
+								(when (not (= (line-number-at-pos) (getf (car tail) :line-num)))
+								  (setf (cdr tail)
+										(cons (list :line-num (line-number-at-pos)
+													:line (buffer-substring-no-properties
+														   (line-beginning-position)
+														   (min (+ 180 (line-beginning-position)) (line-end-position))))
+											  nil))
+								  (setf tail (cdr tail)))))
+							(setf last-pt (point)))))))
 		 (output-func (lambda (last-dir shift-of-last-dir this-file matches)
 						"
 insert buffer:
@@ -117,6 +123,7 @@ return shift of this-dir (directory of this-file)."
 			(when-let ((matches (funcall grep-func file search-for-rx)))
 			  (setq shift-of-last-dir (funcall output-func last-dir shift-of-last-dir file matches)
 					last-dir (file-name-directory file))))))
+	  (message "Done")
 	  (set-buffer-modified-p nil)
 	  (org-mode)
 	  (outline-show-all)
@@ -130,7 +137,7 @@ return shift of this-dir (directory of this-file)."
   (let ((buffer (generate-new-buffer "*ggrep*")))
 	(with-current-buffer buffer
 	  (setq ggrep-result-buffer (concat (buffer-name buffer) "-result"))
-	  (widget-insert "\n\ngrep with Graphical User Interface, output result in org-mode format\n\n")
+	  (widget-insert "\ngrep with Graphical User Interface, output result in org-mode format\n\n")
 	  (widget-insert "Path:\n")
 	  (setq ggrep-path-widget
 			(widget-create 'editable-list
@@ -138,6 +145,7 @@ return shift of this-dir (directory of this-file)."
 						   '(link :value "..."
 								  :notify (lambda (widget &rest ignore)
 											(widget-value-set widget (ggrep-find-dir (widget-value widget)))
+											(setq default-directory (widget-value widget))
 											(widget-setup)))))
 	  (widget-insert "\nFile Mask (support shell wildcard):\n")
 	  (setq ggrep-mask-widget
